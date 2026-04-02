@@ -9,6 +9,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+try:
+    from astrbot.core.agent.tool import FunctionTool
+except Exception:
+    FunctionTool = object
+
 from .cache import InFlightRequestDeduper, TTLCache
 from .config import (
     CACHE_MAX_ENTRIES,
@@ -31,8 +36,33 @@ from .config import (
 from .models import GuideSection, LookupResult, WikiArticle
 from .persistent_cache import PersistentLookupCache
 from .ranking import normalize_text
+from .rendering import format_plain_text
 from .results import build_success_response, prefetch_icon_data_uris
 from .wiki_client import WikiClient
+
+
+class TerrariaWikiTool(FunctionTool):
+    name = "terraria_wiki_lookup"
+    description = "查询泰拉瑞亚中文 Wiki 词条，返回适合 AI 继续引用的纯文本摘要。"
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "要查询的泰拉瑞亚词条关键词，例如星怒、蜂王、神圣锭、Guide:Hardmode。",
+            }
+        },
+        "required": ["query"],
+    }
+
+    def __init__(self, plugin: "TerrariaWikiPlugin"):
+        self._plugin = plugin
+
+    async def call(self, context=None, **kwargs):
+        query = str(kwargs.get("query") or "").strip()
+        if not query:
+            return "请提供查询关键词，例如：泰拉瑞亚"
+        return await self._plugin.lookup_plain_text(query)
 
 
 @register("astrbot_plugin_terraria_wiki", "kaipol", "泰拉瑞亚中文 Wiki 查询插件", PLUGIN_VERSION)
@@ -58,6 +88,7 @@ class TerrariaWikiPlugin(Star):
             )
         except Exception as error:
             logger.error(f"[TerrariaWiki] 初始化持久缓存失败: {error}")
+        self._register_ai_tool()
 
     async def initialize(self):
         timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS)
@@ -86,40 +117,83 @@ class TerrariaWikiPlugin(Star):
                 logger.error(f"[TerrariaWiki] 预抓取图标失败: {error}")
 
     @filter.command("wiki")
-    async def wiki(self, event: AstrMessageEvent):
-        query = event.message_str.strip()
-        if not query:
+    async def wiki(self, event: AstrMessageEvent, query: str = ""):
+        normalized_query = query.strip()
+        if not normalized_query:
+            normalized_query = event.message_str.strip()
+        if not normalized_query:
             yield event.plain_result("请提供查询关键词，例如：/wiki 泰拉瑞亚")
             return
 
         try:
-            result = await self._lookup(query)
+            result = await self._lookup(normalized_query)
         except asyncio.TimeoutError:
-            logger.error(f"[TerrariaWiki] 查询超时: query={query}")
+            logger.error(f"[TerrariaWiki] 查询超时: query={normalized_query}")
             yield event.plain_result("查询 Wiki 超时，请稍后重试。")
             return
         except aiohttp.ClientConnectionError as error:
-            logger.error(f"[TerrariaWiki] 连接失败: query={query}, error={error}")
+            logger.error(f"[TerrariaWiki] 连接失败: query={normalized_query}, error={error}")
             yield event.plain_result("当前无法连接 Wiki，请稍后再试。")
             return
         except aiohttp.ClientResponseError as error:
-            logger.error(f"[TerrariaWiki] HTTP 错误: query={query}, status={error.status}, message={error.message}")
+            logger.error(f"[TerrariaWiki] HTTP 错误: query={normalized_query}, status={error.status}, message={error.message}")
             yield event.plain_result("查询 Wiki 时出错，请稍后重试。")
             return
         except aiohttp.ClientError as error:
-            logger.error(f"[TerrariaWiki] 网络异常: query={query}, error={error}")
+            logger.error(f"[TerrariaWiki] 网络异常: query={normalized_query}, error={error}")
             yield event.plain_result("查询 Wiki 时网络异常，请稍后再试。")
             return
         except Exception as error:
-            logger.error(f"[TerrariaWiki] 查询失败: query={query}, error={error}")
+            logger.error(f"[TerrariaWiki] 查询失败: query={normalized_query}, error={error}")
             yield event.plain_result("查询失败，请稍后再试。")
             return
 
         if result is None:
-            yield event.plain_result(f"未找到与「{query}」相关的内容。")
+            yield event.plain_result(f"未找到与「{normalized_query}」相关的内容。")
             return
 
         yield build_success_response(event, result)
+
+
+    def _register_ai_tool(self):
+        if self.context is None:
+            return
+        tool = TerrariaWikiTool(self)
+        add_llm_tools = getattr(self.context, "add_llm_tools", None)
+        if callable(add_llm_tools):
+            add_llm_tools(tool)
+            return
+        provider_manager = getattr(self.context, "provider_manager", None)
+        llm_tools = getattr(provider_manager, "llm_tools", None)
+        func_list = getattr(llm_tools, "func_list", None)
+        if isinstance(func_list, list):
+            func_list.append(tool)
+
+    async def lookup_plain_text(self, query: str) -> str:
+        normalized_query = query.strip()
+        if not normalized_query:
+            return "请提供查询关键词，例如：泰拉瑞亚"
+        try:
+            result = await self._lookup(normalized_query)
+        except asyncio.TimeoutError:
+            logger.error(f"[TerrariaWiki] 查询超时: query={normalized_query}")
+            return "查询 Wiki 超时，请稍后重试。"
+        except aiohttp.ClientConnectionError as error:
+            logger.error(f"[TerrariaWiki] 连接失败: query={normalized_query}, error={error}")
+            return "当前无法连接 Wiki，请稍后再试。"
+        except aiohttp.ClientResponseError as error:
+            logger.error(f"[TerrariaWiki] HTTP 错误: query={normalized_query}, status={error.status}, message={error.message}")
+            return "查询 Wiki 时出错，请稍后重试。"
+        except aiohttp.ClientError as error:
+            logger.error(f"[TerrariaWiki] 网络异常: query={normalized_query}, error={error}")
+            return "查询 Wiki 时网络异常，请稍后再试。"
+        except Exception as error:
+            logger.error(f"[TerrariaWiki] 查询失败: query={normalized_query}, error={error}")
+            return "查询失败，请稍后再试。"
+
+        if result is None:
+            return f"未找到与「{normalized_query}」相关的内容。"
+        return format_plain_text(result)
 
     async def _lookup(self, query: str) -> Optional[LookupResult]:
         if self._session and not self._session.closed:

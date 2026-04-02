@@ -18,7 +18,7 @@ def install_fake_astrbot_modules():
             return None
 
     class DummyFilter:
-        def command(self, _name):
+        def command(self, _name, alias=None):
             def decorator(func):
                 return func
 
@@ -29,7 +29,12 @@ def install_fake_astrbot_modules():
             self.context = context
 
     class DummyContext:
-        pass
+        def __init__(self):
+            self.added_tools = []
+            self.provider_manager = types.SimpleNamespace(llm_tools=types.SimpleNamespace(func_list=[]))
+
+        def add_llm_tools(self, *tools):
+            self.added_tools.extend(tools)
 
     class DummyAstrMessageEvent:
         pass
@@ -150,6 +155,25 @@ class RefactorPluginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_main_reexports_plugin_class(self):
         self.assertIs(main_module.TerrariaWikiPlugin, plugin_module.TerrariaWikiPlugin)
+
+    async def test_plugin_registers_ai_tool_via_add_llm_tools(self):
+        context = plugin_module.Context()
+        instance = plugin_module.TerrariaWikiPlugin(context)
+        self.assertEqual(len(context.added_tools), 1)
+        self.assertIsInstance(context.added_tools[0], plugin_module.TerrariaWikiTool)
+        self.assertIs(context.added_tools[0]._plugin, instance)
+        if instance._persistent_cache is not None:
+            instance._persistent_cache.close()
+
+    async def test_plugin_registers_ai_tool_via_legacy_tool_manager(self):
+        context = plugin_module.Context()
+        context.add_llm_tools = None
+        instance = plugin_module.TerrariaWikiPlugin(context)
+        self.assertEqual(len(context.provider_manager.llm_tools.func_list), 1)
+        self.assertIsInstance(context.provider_manager.llm_tools.func_list[0], plugin_module.TerrariaWikiTool)
+        self.assertIs(context.provider_manager.llm_tools.func_list[0]._plugin, instance)
+        if instance._persistent_cache is not None:
+            instance._persistent_cache.close()
 
     async def test_pick_best_result_prefers_exact_match(self):
         selection = ranking_module.pick_best_result(
@@ -314,6 +338,45 @@ class RefactorPluginTests(unittest.IsolatedAsyncioTestCase):
         async for item in instance.wiki(event):
             results.append(item)
         self.assertEqual(results, [("plain", "请提供查询关键词，例如：/wiki 泰拉瑞亚")])
+
+    async def test_ai_tool_handles_empty_input(self):
+        instance = self.make_instance()
+        tool = plugin_module.TerrariaWikiTool(instance)
+        result = await tool.call(query="   ")
+        self.assertEqual(result, "请提供查询关键词，例如：泰拉瑞亚")
+
+    async def test_ai_tool_returns_plain_text_for_success(self):
+        instance = self.make_instance()
+        instance._lookup = AsyncMock(
+            return_value=models_module.LookupResult(
+                article=models_module.WikiArticle(title="泰拉瑞亚", extract="沙盒游戏"),
+                exact_match=True,
+            )
+        )
+        tool = plugin_module.TerrariaWikiTool(instance)
+        result = await tool.call(query="神圣锭")
+        self.assertIn("【泰拉瑞亚】", result)
+
+    async def test_lookup_plain_text_handles_timeout(self):
+        instance = self.make_instance()
+        instance._lookup = AsyncMock(side_effect=asyncio.TimeoutError())
+        result = await instance.lookup_plain_text("泰拉")
+        self.assertEqual(result, "查询 Wiki 超时，请稍后重试。")
+
+    async def test_wiki_command_accepts_parsed_query_argument(self):
+        instance = self.make_instance()
+        instance._lookup = AsyncMock(
+            return_value=models_module.LookupResult(
+                article=models_module.WikiArticle(title="泰拉瑞亚", extract="沙盒游戏"),
+                exact_match=True,
+            )
+        )
+        event = FakeEvent("   ")
+        results = []
+        async for item in instance.wiki(event, "神圣锭"):
+            results.append(item)
+        instance._lookup.assert_awaited_once_with("神圣锭")
+        self.assertEqual(results[0][0], "chain")
 
     async def test_wiki_command_handles_timeout(self):
         instance = self.make_instance()
