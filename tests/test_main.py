@@ -18,8 +18,19 @@ def install_fake_astrbot_modules():
             return None
 
     class DummyFilter:
+        def __init__(self):
+            self.registered_llm_tools = []
+
         def command(self, _name, alias=None):
             def decorator(func):
+                return func
+
+            return decorator
+
+        def llm_tool(self, name=None, **_kwargs):
+            def decorator(func):
+                func.__llm_tool_name__ = name or func.__name__
+                self.registered_llm_tools.append(func.__llm_tool_name__)
                 return func
 
             return decorator
@@ -156,24 +167,45 @@ class RefactorPluginTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_reexports_plugin_class(self):
         self.assertIs(main_module.TerrariaWikiPlugin, plugin_module.TerrariaWikiPlugin)
 
-    async def test_plugin_registers_ai_tool_via_add_llm_tools(self):
+    async def test_plugin_registers_llm_tool_handler_when_available(self):
         context = plugin_module.Context()
         instance = plugin_module.TerrariaWikiPlugin(context)
-        self.assertEqual(len(context.added_tools), 1)
-        self.assertIsInstance(context.added_tools[0], plugin_module.TerrariaWikiTool)
-        self.assertIs(context.added_tools[0]._plugin, instance)
+        self.assertIn("terraria_wiki_lookup", plugin_module.filter.registered_llm_tools)
+        self.assertEqual(context.added_tools, [])
+        self.assertEqual(context.provider_manager.llm_tools.func_list, [])
         if instance._persistent_cache is not None:
             instance._persistent_cache.close()
 
-    async def test_plugin_registers_ai_tool_via_legacy_tool_manager(self):
+    async def test_plugin_registers_ai_tool_via_add_llm_tools_when_llm_tool_decorator_unavailable(self):
+        context = plugin_module.Context()
+        original_llm_tool = plugin_module.filter.llm_tool
+        instance = None
+        plugin_module.filter.llm_tool = None
+        try:
+            instance = plugin_module.TerrariaWikiPlugin(context)
+            self.assertEqual(len(context.added_tools), 1)
+            self.assertIsInstance(context.added_tools[0], plugin_module.TerrariaWikiTool)
+            self.assertIs(context.added_tools[0]._plugin, instance)
+        finally:
+            plugin_module.filter.llm_tool = original_llm_tool
+            if instance is not None and instance._persistent_cache is not None:
+                instance._persistent_cache.close()
+
+    async def test_plugin_registers_ai_tool_via_legacy_tool_manager_when_llm_tool_decorator_unavailable(self):
         context = plugin_module.Context()
         context.add_llm_tools = None
-        instance = plugin_module.TerrariaWikiPlugin(context)
-        self.assertEqual(len(context.provider_manager.llm_tools.func_list), 1)
-        self.assertIsInstance(context.provider_manager.llm_tools.func_list[0], plugin_module.TerrariaWikiTool)
-        self.assertIs(context.provider_manager.llm_tools.func_list[0]._plugin, instance)
-        if instance._persistent_cache is not None:
-            instance._persistent_cache.close()
+        original_llm_tool = plugin_module.filter.llm_tool
+        instance = None
+        plugin_module.filter.llm_tool = None
+        try:
+            instance = plugin_module.TerrariaWikiPlugin(context)
+            self.assertEqual(len(context.provider_manager.llm_tools.func_list), 1)
+            self.assertIsInstance(context.provider_manager.llm_tools.func_list[0], plugin_module.TerrariaWikiTool)
+            self.assertIs(context.provider_manager.llm_tools.func_list[0]._plugin, instance)
+        finally:
+            plugin_module.filter.llm_tool = original_llm_tool
+            if instance is not None and instance._persistent_cache is not None:
+                instance._persistent_cache.close()
 
     async def test_pick_best_result_prefers_exact_match(self):
         selection = ranking_module.pick_best_result(
