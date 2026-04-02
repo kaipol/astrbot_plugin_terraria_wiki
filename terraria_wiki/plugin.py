@@ -7,17 +7,7 @@ import aiohttp
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star, register
-
-
-def _noop_llm_tool(*_args, **_kwargs):
-    def decorator(func):
-        return func
-
-    return decorator
-
-
-LLM_TOOL_DECORATOR = getattr(filter, "llm_tool", None) or _noop_llm_tool
+from astrbot.api.star import Context, Star
 
 try:
     from astrbot.core.agent.tool import FunctionTool
@@ -75,7 +65,6 @@ class TerrariaWikiTool(FunctionTool):
         return await self._plugin.lookup_plain_text(query)
 
 
-@register("astrbot_plugin_terraria_wiki", "kaipol", "泰拉瑞亚中文 Wiki 查询插件", PLUGIN_VERSION)
 class TerrariaWikiPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -126,7 +115,6 @@ class TerrariaWikiPlugin(Star):
             except Exception as error:
                 logger.error(f"[TerrariaWiki] 预抓取图标失败: {error}")
 
-    @filter.command("wiki")
     async def wiki(self, event: AstrMessageEvent, query: str = ""):
         normalized_query = query.strip()
         if not normalized_query:
@@ -165,7 +153,6 @@ class TerrariaWikiPlugin(Star):
         yield build_success_response(event, result)
 
 
-    @LLM_TOOL_DECORATOR(name="terraria_wiki_lookup")
     async def terraria_wiki_lookup(self, event: AstrMessageEvent, query: str):
         """查询泰拉瑞亚中文 Wiki 词条，返回适合 AI 继续引用的纯文本摘要。
 

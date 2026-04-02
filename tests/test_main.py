@@ -165,12 +165,12 @@ class RefactorPluginTests(unittest.IsolatedAsyncioTestCase):
         return instance
 
     async def test_main_reexports_plugin_class(self):
-        self.assertIs(main_module.TerrariaWikiPlugin, plugin_module.TerrariaWikiPlugin)
+        self.assertTrue(issubclass(main_module.TerrariaWikiPlugin, plugin_module.TerrariaWikiPlugin))
 
     async def test_plugin_registers_llm_tool_handler_when_available(self):
         context = plugin_module.Context()
-        instance = plugin_module.TerrariaWikiPlugin(context)
-        self.assertIn("terraria_wiki_lookup", plugin_module.filter.registered_llm_tools)
+        instance = main_module.TerrariaWikiPlugin(context)
+        self.assertIn("terraria_wiki_lookup", main_module.filter.registered_llm_tools)
         self.assertEqual(context.added_tools, [])
         self.assertEqual(context.provider_manager.llm_tools.func_list, [])
         if instance._persistent_cache is not None:
