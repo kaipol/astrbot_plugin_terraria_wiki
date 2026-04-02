@@ -115,8 +115,10 @@ class TerrariaWikiPlugin(Star):
             except Exception as error:
                 logger.error(f"[TerrariaWiki] 预抓取图标失败: {error}")
 
-    async def wiki(self, event: AstrMessageEvent, query: str = ""):
-        normalized_query = query.strip()
+    async def wiki(self, event: AstrMessageEvent, query: str = "", *extra_args):
+        normalized_query = str(query or "").strip()
+        if not normalized_query and extra_args:
+            normalized_query = str(extra_args[0] or "").strip()
         if not normalized_query:
             normalized_query = event.message_str.strip()
         if not normalized_query:

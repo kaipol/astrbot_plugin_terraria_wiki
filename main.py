@@ -30,8 +30,11 @@ from terraria_wiki.wiki_client import WikiClient
 @register("astrbot_plugin_terraria_wiki", "kaipol", "泰拉瑞亚中文 Wiki 查询插件", PLUGIN_VERSION)
 class TerrariaWikiPlugin(_BaseTerrariaWikiPlugin):
     @filter.command("wiki")
-    async def wiki(self, event: AstrMessageEvent, query: str = ""):
-        async for item in super().wiki(event, query):
+    async def wiki(self, event: AstrMessageEvent, query: str = "", *extra_args):
+        normalized_query = str(query or "").strip()
+        if not normalized_query and extra_args:
+            normalized_query = str(extra_args[0] or "").strip()
+        async for item in super().wiki(event, normalized_query):
             yield item
 
     @filter.llm_tool(name="terraria_wiki_lookup")
