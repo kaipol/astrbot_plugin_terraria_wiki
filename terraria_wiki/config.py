@@ -1,6 +1,6 @@
 from pathlib import Path
 
-PLUGIN_VERSION = "1.6.0"
+PLUGIN_VERSION = "1.6.1"
 STRUCTURED_SCHEMA_VERSION = "v7"
 WIKI_API_URL = "https://terraria.wiki.gg/zh/api.php"
 WIKI_BASE_URL = "https://terraria.wiki.gg/zh/wiki/"

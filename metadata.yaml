@@ -1,6 +1,6 @@
 name: astrbot_plugin_terraria_wiki
 display_name: 泰拉瑞亚 Wiki 查询
 desc: 支持重定向、长页面摘要、结构化属性提取、持久缓存与富媒体卡片回退的泰拉瑞亚中文 Wiki 查询插件。
-version: 1.6.0
+version: 1.6.1
 author: kaipol
 repo: https://github.com/kaipol/astrbot_plugin_terraria_wiki
